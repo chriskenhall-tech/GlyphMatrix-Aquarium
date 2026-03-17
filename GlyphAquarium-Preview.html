@@ -444,31 +444,38 @@ function downloadPNG() {
 
 // ─── Export: JSON animation ───────────────────────────────────────────────────
 function exportJSON() {
-  document.getElementById('status').textContent = 'Generating 5s @ 30fps…';
+  document.getElementById('status').textContent = 'Generating 5s @ 15fps (sparse)…';
   setTimeout(() => {
-    const FPS    = 30;
-    const SECS   = 5;
-    const TOTAL  = FPS * SECS;
+    const FPS   = 15;
+    const SECS  = 5;
+    const TOTAL = FPS * SECS;
     const frames = [];
 
     // Save state
     const savedTick  = tick;
     const savedScene = JSON.parse(JSON.stringify(scene));
 
-    // Force into a nice scene for the preview
-    initEvent('school');
+    // Use the currently visible scene
+    const currentType = scene.type === 'wait' ? 'school' : scene.type;
+    initEvent(currentType);
 
     for (let i = 0; i < TOTAL; i++) {
+      // Skip every other tick to match 15fps from the 30fps engine
       renderNextFrame();
-      // Store as 0-255 integers
-      frames.push(Array.from(frame).map(v => Math.round(v * 255)));
+      renderNextFrame();
+      // Sparse: only store [index, value] for non-zero pixels
+      const sparse = [];
+      for (let j = 0; j < frame.length; j++) {
+        if (frame[j] > 0) sparse.push([j, Math.round(frame[j] * 255)]);
+      }
+      frames.push(sparse);
     }
 
     // Restore state
     tick  = savedTick;
     scene = savedScene;
 
-    const json = JSON.stringify({ version:1, fps:FPS, frames }, null, 0);
+    const json = JSON.stringify({ version:1, fps:FPS, size:SIZE, frames }, null, 0);
     const blob = new Blob([json], { type:'application/json' });
     const url  = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -479,7 +486,7 @@ function exportJSON() {
 
     const kb = (blob.size / 1024).toFixed(1);
     document.getElementById('status').textContent =
-      `JSON downloaded — ${TOTAL} frames, ${kb} KB`;
+      `JSON downloaded — ${TOTAL} frames @ ${FPS}fps, ${kb} KB (sparse)`;
   }, 50);
 }
 

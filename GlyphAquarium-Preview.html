@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Glyph Aquarium — Export Tool</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0a0a0a;
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px;
+    gap: 20px;
+  }
+  h1 { font-size: 18px; letter-spacing: 3px; color: #ccc; }
+  canvas { border: 1px solid #222; display: block; }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button {
+    padding: 10px 22px;
+    background: #1a1a1a;
+    color: #fff;
+    border: 1px solid #444;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 1px;
+    transition: background 0.15s;
+  }
+  button:hover { background: #2a2a2a; }
+  #status { font-size: 12px; color: #666; min-height: 18px; }
+  .scene-label {
+    font-size: 11px;
+    color: #444;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<h1>GLYPH AQUARIUM</h1>
+<canvas id="canvas" width="512" height="512"></canvas>
+<div class="scene-label" id="sceneLabel">—</div>
+<div class="controls">
+  <button onclick="downloadPNG()">⬇ Download 512×512 PNG</button>
+  <button onclick="exportJSON()">⬇ Export JSON Animation (5s)</button>
+  <button onclick="cycleScene()">↻ Next Scene</button>
+</div>
+<div id="status"></div>
+
+<script>
+// ─── Constants ────────────────────────────────────────────────────────────────
+const SIZE   = 25;
+const RADIUS = 12.37;
+const CELL   = 512 / SIZE;          // ~20.48 px per glyph cell
+const DOT_R  = CELL * 0.28;        // bright core radius
+const GLOW_R = CELL * 0.52;        // glow halo radius
+
+// ─── Sprite data ──────────────────────────────────────────────────────────────
+const SPECIES = {
+  fish: [
+    "00004997400000",
+    "00499119970990",
+    "09991119999110",
+    "00499119970990",
+    "00004997400000"
+  ],
+  shark: [
+    "0000000000004000000",
+    "0000000000079000000",
+    "0000000000499400004",
+    "0000000007999900049",
+    "0000049999999999999",
+    "0049999999999999997",
+    "0999911999999999900",
+    "9991111199999999997",
+    "0999911999999999900",
+    "0049999999999999997",
+    "0000049999999900049",
+    "0000000004999000004",
+    "0000000000079000000",
+    "0000000000004000000"
+  ],
+  ray: [
+    "0000479740000000",
+    "0047991199740000",
+    "0799111119970000",
+    "9991111199974411",
+    "0799111119970000",
+    "0047991199740000",
+    "0000479740000000"
+  ],
+  smallFish: [
+    "0099704",
+    "9911991",
+    "0099704"
+  ],
+  squid: [
+    "000000000400007",
+    "000000004900490",
+    "000499999900994",
+    "049999999999999",
+    "499999999999111",
+    "049999999999999",
+    "000499999900994",
+    "000000004900490",
+    "000000000400007"
+  ],
+  crab: [
+    "9000009",
+    "0900090",
+    "0499940",
+    "9901099",
+    "4999994",
+    "0900090",
+    "4000004"
+  ],
+  hook: [
+    "090",
+    "090",
+    "090",
+    "090",
+    "099",
+    "909",
+    "099"
+  ],
+  bubbleBig: [
+    "04940",
+    "49094",
+    "90009",
+    "49094",
+    "04940"
+  ],
+  bubbleSmall: [
+    "070",
+    "707",
+    "070"
+  ]
+};
+
+// ─── Decor (seaweed) ──────────────────────────────────────────────────────────
+const DECOR = [
+  { x:3,  h:3, offset:0.0 }, { x:6,  h:4, offset:1.0 },
+  { x:9,  h:2, offset:2.0 }, { x:12, h:3, offset:3.0 },
+  { x:15, h:4, offset:0.5 }, { x:18, h:3, offset:1.5 },
+  { x:21, h:2, offset:2.5 }
+];
+
+// ─── Scene state ──────────────────────────────────────────────────────────────
+let tick = 0;
+let scene = resetScene();
+
+function resetScene() {
+  return { type:"wait", timer:5, posX:30, posY:10, angle:0,
+           hookY:-10, fishPhase:0, bubbles:[] };
+}
+
+function initEvent(type) {
+  scene.type  = type;
+  scene.posX  = 30;
+  scene.timer = 0;
+  scene.angle = 0;
+  if      (type === "hook")   { scene.hookY=-15; scene.fishPhase=0; scene.posX=34; scene.posY=14; }
+  else if (type === "shark")  { scene.posY=7; }
+  else if (type === "ray")    { scene.posY=9; }
+  else if (type === "school") { scene.posY=5; }
+  else if (type === "squid")  { scene.posY=9; }
+  else if (type === "fish")   { scene.posY=13; }
+  else if (type === "crab")   { scene.posY=12; }
+  else if (type === "idle") {
+    scene.bubbles = Array.from({length:4}, () => ({
+      x: 5 + Math.random()*15,
+      y: 25 + Math.random()*20,
+      speed: 0.1 + Math.random()*0.1,
+      size: Math.random()<0.5 ? "big" : "small",
+      wobble: Math.random()*Math.PI*2
+    }));
+    scene.timer = 0;
+  }
+}
+
+function endEvent() {
+  scene.type  = "wait";
+  scene.timer = Math.floor(30 + Math.random()*60);
+}
+
+function updateLogic() {
+  if (scene.type === "wait") {
+    scene.timer--;
+    if (scene.timer <= 0) {
+      const r = Math.random();
+      if      (r < 0.10) initEvent("hook");
+      else if (r < 0.25) initEvent("shark");
+      else if (r < 0.45) initEvent("ray");
+      else if (r < 0.60) initEvent("school");
+      else if (r < 0.75) initEvent("crab");
+      else if (r < 0.85) initEvent("squid");
+      else if (r < 0.92) initEvent("idle");
+      else                initEvent("fish");
+    }
+  } else {
+    scene.timer++;
+    if (scene.type === "hook") {
+      if (scene.fishPhase === 0) {
+        if (scene.hookY < 12) scene.hookY += 0.25;
+        if (scene.posX > 18)  scene.posX  -= 0.35;
+        if (scene.hookY >= 12 && scene.posX <= 18) { scene.fishPhase=1; scene.timer=0; }
+      } else if (scene.fishPhase === 1) {
+        if (scene.timer > 40) scene.fishPhase = 2;
+      } else {
+        scene.posX  += 0.7;
+        scene.hookY -= 0.5;
+        if (scene.posX > 35) endEvent();
+      }
+    } else if (scene.type === "shark") {
+      scene.posX -= 0.40;
+      if (scene.posX < -25) endEvent();
+    } else if (scene.type === "squid") {
+      scene.posX -= (scene.timer % 30 < 8) ? 0.8 : 0.15;
+      if (scene.posX < -20) endEvent();
+    } else if (scene.type === "crab") {
+      const progress = scene.timer / 200;
+      scene.angle = progress * -Math.PI;
+      scene.posX  = 12 + Math.cos(scene.angle) * 11;
+      scene.posY  = 12 + Math.sin(scene.angle) * 11;
+      if (scene.timer > 200) endEvent();
+    } else if (scene.type === "idle") {
+      scene.bubbles.forEach(b => {
+        b.y -= b.speed;
+        if (b.y < -10) { b.y = 25 + Math.random()*15; b.x = 5 + Math.random()*15; }
+      });
+      if (scene.timer > 300) endEvent();
+    } else {
+      scene.posX -= 0.25;
+      if (scene.posX < -20) endEvent();
+    }
+  }
+}
+
+// ─── Frame renderer ───────────────────────────────────────────────────────────
+const frame = new Float32Array(SIZE * SIZE);
+
+function drawShape(shape, ox, oy, mods) {
+  const srcW = shape[0].length;
+  const srcH = shape.length;
+  const cx   = srcW / 2;
+  const cy   = srcH / 2;
+
+  for (let srcY = 0; srcY < srcH; srcY++) {
+    for (let rawSrcX = 0; rawSrcX < srcW; rawSrcX++) {
+      const srcX = mods.flipX ? (srcW - 1 - rawSrcX) : rawSrcX;
+      const ch   = shape[srcY][srcX];
+      if (ch === '0') continue;
+
+      let py = srcY;
+      const spriteX = mods.flipX ? (srcW - 1 - srcX) : srcX;
+
+      // tail wag
+      if (mods.wag && spriteX >= srcW - mods.wagLength) {
+        const tf = (spriteX - (srcW - mods.wagLength)) / mods.wagLength;
+        py += Math.round(mods.wag * tf * 2);
+      }
+      // wing flap
+      if (mods.flap && (srcY < 2 || srcY > srcH - 3)) {
+        const intensity = srcY < 2 ? (2 - srcY) : (srcY - (srcH - 3));
+        py += srcY < 2 ? -Math.round(mods.flap * intensity) : Math.round(mods.flap * intensity);
+      }
+      // tentacle pulse
+      if (mods.pulse && spriteX > srcW / 2) {
+        const cd = srcY - srcH / 2;
+        py -= Math.round(cd * mods.pulse);
+      }
+      // crab scuttle
+      if (mods.scuttle && srcY >= srcH - 1) py -= mods.scuttle;
+
+      let tx, ty;
+      if (mods.rotation != null) {
+        const rx = rawSrcX - cx;
+        const ry = py - cy;
+        tx = Math.floor(ox + rx * Math.cos(mods.rotation) - ry * Math.sin(mods.rotation));
+        ty = Math.floor(oy + rx * Math.sin(mods.rotation) + ry * Math.cos(mods.rotation));
+      } else {
+        tx = Math.floor(ox + rawSrcX - cx);
+        ty = Math.floor(oy + py - cy);
+      }
+
+      if (tx >= 0 && tx < SIZE && ty >= 0 && ty < SIZE) {
+        const dist = Math.sqrt((tx-12)**2 + (ty-12)**2);
+        if (dist <= RADIUS) {
+          const bv = (130 + (parseInt(ch) - 1) * 125 / 8) / 255;
+          const idx = ty * SIZE + tx;
+          if (bv > frame[idx]) frame[idx] = bv;
+        }
+      }
+    }
+  }
+}
+
+function renderNextFrame() {
+  frame.fill(0);
+  tick++;
+  updateLogic();
+
+  const tailWag  = Math.sin(tick * 0.3) * 0.7;
+  const wingFlap = Math.sin(tick * 0.1) * 1.2;
+
+  // seaweed
+  DECOR.forEach(d => {
+    const sway = Math.sin(tick * 0.05 + d.offset) * 0.8;
+    for (let i = 0; i < d.h; i++) {
+      const bend = (i / d.h) * sway;
+      const tx = Math.floor(d.x + bend);
+      const ty = (SIZE - 1) - i;
+      if (tx >= 0 && tx < SIZE && ty >= 0 && ty < SIZE) {
+        frame[ty * SIZE + tx] = Math.min(1, (160 + i * 24) / 255);
+      }
+    }
+  });
+
+  if (scene.type === "wait") return normalizeFrame();
+
+  if (scene.type === "idle") {
+    scene.bubbles.forEach(b => {
+      const bx = b.x + Math.sin(tick * 0.05 + b.wobble) * 2;
+      const sp = b.size === "big" ? SPECIES.bubbleBig : SPECIES.bubbleSmall;
+      drawShape(sp, bx, b.y, {});
+    });
+  } else if (scene.type === "school") {
+    [[scene.posX,scene.posY],[scene.posX+8,scene.posY+3],
+     [scene.posX+4,scene.posY+7],[scene.posX+10,scene.posY+10]]
+    .forEach(([fx,fy], i) => {
+      const wag = Math.sin(tick * 0.3 + i) * 0.4;
+      drawShape(SPECIES.smallFish, fx, fy + wag, { wag, wagLength:2 });
+    });
+  } else if (scene.type === "ray") {
+    drawShape(SPECIES.ray, scene.posX, scene.posY,
+      { flap:wingFlap, wag:tailWag*0.5, wagLength:6 });
+  } else if (scene.type === "shark") {
+    drawShape(SPECIES.shark, scene.posX, scene.posY,
+      { wag:tailWag*1.5, wagLength:7 });
+  } else if (scene.type === "squid") {
+    const pulse = (scene.timer % 30 < 8) ? 0 : 0.6;
+    drawShape(SPECIES.squid, scene.posX, scene.posY, { pulse });
+  } else if (scene.type === "crab") {
+    const scuttle = (scene.timer % 6 < 3) ? 1 : 0;
+    drawShape(SPECIES.crab, scene.posX, scene.posY,
+      { scuttle, rotation: scene.angle - Math.PI / 2 });
+  } else if (scene.type === "hook") {
+    const endY = Math.floor(scene.hookY - 3.5);
+    for (let y = 0; y <= endY; y++) {
+      const dist = Math.sqrt((12-12)**2 + (y-12)**2);
+      if (dist <= RADIUS) {
+        const idx = y * SIZE + 12;
+        if (idx >= 0 && idx < frame.length)
+          frame[idx] = Math.max(frame[idx], 200/255);
+      }
+    }
+    drawShape(SPECIES.hook, 12, scene.hookY, {});
+    const isFlipped = scene.fishPhase === 2;
+    const swimWag = scene.fishPhase === 1 ? 0 : tailWag * (isFlipped ? 2 : 1);
+    drawShape(SPECIES.fish, scene.posX, scene.posY,
+      { flipX:isFlipped, wag:swimWag, wagLength:3 });
+  } else if (scene.type === "fish") {
+    drawShape(SPECIES.fish, scene.posX, scene.posY,
+      { wag:tailWag, wagLength:4 });
+  } else if (SPECIES[scene.type]) {
+    drawShape(SPECIES[scene.type], scene.posX, scene.posY,
+      { wag:tailWag, wagLength:4 });
+  }
+
+  return normalizeFrame();
+}
+
+function normalizeFrame() {
+  let peak = 0;
+  for (let i = 0; i < frame.length; i++) if (frame[i] > peak) peak = frame[i];
+  if (peak > 0 && peak < 1) {
+    for (let i = 0; i < frame.length; i++)
+      if (frame[i] > 0) frame[i] /= peak;
+  }
+  return frame;
+}
+
+// ─── Canvas renderer ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+function paintFrame(f) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 512, 512);
+
+  for (let row = 0; row < SIZE; row++) {
+    for (let col = 0; col < SIZE; col++) {
+      const val = f[row * SIZE + col];
+      if (val <= 0) continue;
+
+      const cx = (col + 0.5) * CELL;
+      const cy = (row + 0.5) * CELL;
+
+      // glow halo
+      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, GLOW_R);
+      grd.addColorStop(0,   `rgba(255,255,255,${val * 0.35})`);
+      grd.addColorStop(0.4, `rgba(255,255,255,${val * 0.18})`);
+      grd.addColorStop(1,   'rgba(255,255,255,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(cx, cy, GLOW_R, 0, Math.PI * 2);
+      ctx.fill();
+
+      // bright core
+      const alpha = Math.min(1, val);
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, DOT_R, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ─── Animation loop ───────────────────────────────────────────────────────────
+function loop() {
+  const f = renderNextFrame();
+  paintFrame(f);
+  document.getElementById('sceneLabel').textContent =
+    scene.type === 'wait' ? '— seaweed —' : scene.type.toUpperCase();
+  requestAnimationFrame(loop);
+}
+loop();
+
+// ─── Export: PNG ──────────────────────────────────────────────────────────────
+function downloadPNG() {
+  // Render a clean single frame
+  renderNextFrame();
+  paintFrame(frame);
+  const link = document.createElement('a');
+  link.download = 'glyph-aquarium-512.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+  document.getElementById('status').textContent = 'PNG downloaded.';
+}
+
+// ─── Export: JSON animation ───────────────────────────────────────────────────
+function exportJSON() {
+  document.getElementById('status').textContent = 'Generating 5s @ 30fps…';
+  setTimeout(() => {
+    const FPS    = 30;
+    const SECS   = 5;
+    const TOTAL  = FPS * SECS;
+    const frames = [];
+
+    // Save state
+    const savedTick  = tick;
+    const savedScene = JSON.parse(JSON.stringify(scene));
+
+    // Force into a nice scene for the preview
+    initEvent('school');
+
+    for (let i = 0; i < TOTAL; i++) {
+      renderNextFrame();
+      // Store as 0-255 integers
+      frames.push(Array.from(frame).map(v => Math.round(v * 255)));
+    }
+
+    // Restore state
+    tick  = savedTick;
+    scene = savedScene;
+
+    const json = JSON.stringify({ version:1, fps:FPS, frames }, null, 0);
+    const blob = new Blob([json], { type:'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.download = 'glyph-aquarium-animation.json';
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    const kb = (blob.size / 1024).toFixed(1);
+    document.getElementById('status').textContent =
+      `JSON downloaded — ${TOTAL} frames, ${kb} KB`;
+  }, 50);
+}
+
+// ─── Manual scene cycle ───────────────────────────────────────────────────────
+const SCENES = ['fish','shark','ray','school','squid','crab','hook','idle'];
+let sceneIdx = 0;
+function cycleScene() {
+  initEvent(SCENES[sceneIdx % SCENES.length]);
+  sceneIdx++;
+}
+</script>
+</body>
+</html>

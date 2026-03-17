@@ -444,9 +444,9 @@ function downloadPNG() {
 
 // ─── Export: JSON animation ───────────────────────────────────────────────────
 function exportJSON() {
-  document.getElementById('status').textContent = 'Generating 5s @ 15fps (sparse)…';
+  document.getElementById('status').textContent = 'Generating 5s @ 30fps (sparse)…';
   setTimeout(() => {
-    const FPS   = 15;
+    const FPS   = 30;
     const SECS  = 5;
     const TOTAL = FPS * SECS;
     const frames = [];
@@ -460,8 +460,6 @@ function exportJSON() {
     initEvent(currentType);
 
     for (let i = 0; i < TOTAL; i++) {
-      // Skip every other tick to match 15fps from the 30fps engine
-      renderNextFrame();
       renderNextFrame();
       // Sparse: only store [index, value] for non-zero pixels
       const sparse = [];

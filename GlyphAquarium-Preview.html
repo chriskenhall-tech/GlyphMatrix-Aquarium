@@ -444,36 +444,29 @@ function downloadPNG() {
 
 // ─── Export: JSON animation ───────────────────────────────────────────────────
 function exportJSON() {
-  document.getElementById('status').textContent = 'Generating 5s @ 30fps (sparse)…';
+  document.getElementById('status').textContent = 'Generating…';
   setTimeout(() => {
-    const FPS   = 30;
-    const SECS  = 5;
-    const TOTAL = FPS * SECS;
+    const FPS   = 10;
+    const SECS  = 3;
+    const TOTAL = FPS * SECS;   // 30 frames total
     const frames = [];
 
-    // Save state
     const savedTick  = tick;
     const savedScene = JSON.parse(JSON.stringify(scene));
 
-    // Use the currently visible scene
     const currentType = scene.type === 'wait' ? 'school' : scene.type;
     initEvent(currentType);
 
     for (let i = 0; i < TOTAL; i++) {
-      renderNextFrame();
-      // Sparse: only store [index, value] for non-zero pixels
-      const sparse = [];
-      for (let j = 0; j < frame.length; j++) {
-        if (frame[j] > 0) sparse.push([j, Math.round(frame[j] * 255)]);
-      }
-      frames.push(sparse);
+      // Step 3 engine ticks per exported frame to stay smooth at 10fps
+      renderNextFrame(); renderNextFrame(); renderNextFrame();
+      frames.push(Array.from(frame).map(v => Math.round(v * 255)));
     }
 
-    // Restore state
     tick  = savedTick;
     scene = savedScene;
 
-    const json = JSON.stringify({ version:1, fps:FPS, size:SIZE, frames }, null, 0);
+    const json = JSON.stringify({ fps:FPS, frames });
     const blob = new Blob([json], { type:'application/json' });
     const url  = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -484,7 +477,7 @@ function exportJSON() {
 
     const kb = (blob.size / 1024).toFixed(1);
     document.getElementById('status').textContent =
-      `JSON downloaded — ${TOTAL} frames @ ${FPS}fps, ${kb} KB (sparse)`;
+      `Downloaded — ${TOTAL} frames @ ${FPS}fps, ${kb} KB`;
   }, 50);
 }
 

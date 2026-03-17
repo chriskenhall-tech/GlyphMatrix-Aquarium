@@ -254,13 +254,13 @@ class GlyphAquariumDemo {
                 val tx = (d.x + bend).toInt()
                 val ty = (SIZE - 1) - i
                 if (tx in 0 until SIZE && ty in 0 until SIZE) {
-                    outputFrame[ty * SIZE + tx] = 80 + (i * 15)
+                    outputFrame[ty * SIZE + tx] = minOf(255, 160 + i * 24)
                 }
             }
         }
 
         // 2. Draw scene
-        if (scene.type == "wait") return outputFrame
+        if (scene.type == "wait") return normalizeFrame()
 
         val tailWag = sin(tick * 0.3) * 0.7
         val wingFlap = sin(tick * 0.1) * 1.2
@@ -321,6 +321,16 @@ class GlyphAquariumDemo {
             }
         }
 
+        return normalizeFrame()
+    }
+
+    private fun normalizeFrame(): IntArray {
+        val peak = outputFrame.max()
+        if (peak in 1..254) {
+            for (i in outputFrame.indices) {
+                if (outputFrame[i] > 0) outputFrame[i] = outputFrame[i] * 255 / peak
+            }
+        }
         return outputFrame
     }
 
@@ -378,7 +388,7 @@ class GlyphAquariumDemo {
                 if (tx in 0 until SIZE && ty in 0 until SIZE) {
                     val dist = sqrt((tx - 12.0) * (tx - 12.0) + (ty - 12.0) * (ty - 12.0))
                     if (dist <= RADIUS) {
-                        val bValue = if (char == '1') 40 else Character.getNumericValue(char) * 28
+                        val bValue = 130 + (Character.getNumericValue(char) - 1) * 125 / 8
                         val idx = ty * SIZE + tx
                         if (bValue > outputFrame[idx]) outputFrame[idx] = bValue
                     }
